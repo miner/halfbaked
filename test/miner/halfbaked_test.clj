@@ -16,3 +16,11 @@
        13 2 3
        13 0 1
        13 1 3))
+
+(deftest interleaving-all
+  (is (interleave-all '(1 3 5) [2 4 6 7]) (range 1 8))
+  (is (interleave-all (range 3)) (range 3))
+  ;; regular interleave terminates on shortest collection
+  (is (interleave '(1 4 7) '(2 5) [3 6 8 9]) (range 1 6))
+  (is (interleave-all '(1 4 7) '(2 5) [3 6 8 9]) (range 1 9)))
+

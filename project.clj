@@ -1,5 +1,5 @@
 (defproject halfbaked "0.1.0-SNAPSHOT"
-  :description "FIXME: write description"
+  :description "My collection of half-baked, semi-useful Clojure code."
   :url "http://github.com/miner/halfbaked"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
