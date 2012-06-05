@@ -140,7 +140,8 @@
 ;; Like standard interleave but doesn't drop excess elements; also works with zero or one
 ;; arg.  Of course, this makes it not so useful when dealing with infinite sequences.
 (defn interleave-all
-  "Returns a lazy seq of the first item in each coll, then the second etc.  If one coll runs out, skip but continue to interleave the rest of the others"
+  "Returns a lazy seq of the first item in each collection, then the second, etc.  If one collection ends,
+continues to interleave the others."
   ([] nil)
   ([c] (seq c))
 
@@ -315,7 +316,6 @@
        (println result#))
      nil))
 
-
 (defn range-down
   "Returns a seq of integers from high (exclusive) down to low (inclusive).
    Low defaults to 0. Step is a positve decrement, defaults to 1.  Like
@@ -327,16 +327,7 @@
      (let [top (+ (- high (mod high step)) (mod low step))]
        (range (if (>= top high) (- top step) top) (dec low) (- step)))))
 
-
-(defn range-down-WORKS
-  "Returns a seq of integers from top (exclusive) down to lowest (inclusive).
-   Lowest defaults to 0. Step is a positve decrement, defaults to 1.  Like
-   (reverse (range lowest top step)) but a bit faster."
-  ([top] (range (dec top) -1 -1))
-  ([top lowest] (range (dec top) (dec lowest) -1))
-  ;; ([top lowest step] {:pre [(pos? step)]} (range (- top step) (dec lowest) (- step))))
-  ([top lowest step]
-     (let [t2 (+ (mod lowest step) (* step (quot top step)))
-           high (if (>= t2 top) (- t2 step) t2)]
-       (range high (dec lowest) (- step)))))
-
+;; Something like this used to be in the fs lib, but it was dropped in v1.0.0.
+(defn fs-join [& path-elements]
+  "Joins path-elements into a string using the File/separator between elemements."
+  (apply str (interpose java.io.File/separator path-elements)))
