@@ -1,4 +1,4 @@
-(defproject halfbaked "0.1.1"
+(defproject com.velisco/halfbaked "0.1.3"
   :description "My collection of half-baked, semi-useful Clojure code."
   :url "http://github.com/miner/halfbaked"
   :license {:name "Eclipse Public License"

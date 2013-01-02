@@ -143,7 +143,7 @@
   "Returns a lazy seq of the first item in each collection, then the second, etc.  If one collection ends,
 continues to interleave the others."
   ([] nil)
-  ([c] (seq c))
+  ([c] (lazy-seq c))
 
   ([c1 c2]
      (lazy-seq
@@ -236,8 +236,9 @@ continues to interleave the others."
    `(let [x# ~x]
       (binding [*print-length* 10
                 *print-level* 3]
-      (println (pr-str '~x) "is" (pr-str x#)
+      (println "Debug:" (pr-str '~x) "is" (pr-str x#)
                (str "; (" ~file ":" ~line ")"))
+      (flush)
       x#))))
 
 
@@ -331,3 +332,29 @@ continues to interleave the others."
 (defn fs-join [& path-elements]
   "Joins path-elements into a string using the File/separator between elemements."
   (apply str (interpose java.io.File/separator path-elements)))
+
+
+(defn ch-upper? [ch]
+  (<= (int \A) (int ch) (int \Z)))
+
+(defn ch-lower? [ch]
+  (<= (int \a) (int ch) (int \z)))
+
+(defn- ch-starter [ch]
+  (cond (ch-upper? ch) \A
+        (ch-lower? ch) \a
+        :else (throw (java.lang.IllegalArgumentException.
+                      (str "Expecting a character A-Z or a-z, but got: '" ch "'")))))
+
+;; Note: end char is inclusive (because that's what I want!)
+(defn ch-range
+  ([end] (ch-range (ch-starter end) end 1))
+  ([start end] (ch-range start end 1))  
+  ([start end step]
+     (map char (range (int start) (inc (int end)) step))))
+
+(defn guard-fn
+ "Returns a function taking a single argument and returns the result of applying f to the arg only
+ if pred is satisfied by the arg.  Otherwise, the arg is returned."
+ [pred f]
+ (fn [arg] (if (pred arg) (f arg) arg)))
