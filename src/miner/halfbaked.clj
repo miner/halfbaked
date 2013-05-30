@@ -124,21 +124,21 @@
 ;; consider reduce-kv as an alternative if you're going to reduce the result
 
 
-;; stolen from github: ninjudd/clojure-useful
+;; inspired by ninjudd/clojure-useful (which has moved to flatland/useful I think)
 (defn update
   "Update value in map where f is a function that takes the old value and the supplied args and
-   returns the new value. For efficiency, Do not change map if the old value is the same as the new
-   value. If key is sequential, update all keys in the sequence with the same function."
+   returns the new value. For efficiency, does not change map if the old value is the same as the
+   new value. If key is sequential, update all keys in the sequence with the same function."  
   [map key f & args]
   (if (sequential? key)
     (reduce #(apply update %1 %2 f args) map key)
     (let [old (get map key)
           new (apply f old args)]
-      (if (= old new) map (assoc map key new)))))
+      (if (identical? old new) map (assoc map key new)))))
 
 
 ;; Like standard interleave but doesn't drop excess elements; also works with zero or one
-;; arg.  Of course, this makes it not so useful when dealing with infinite sequences.
+;; arg.  Of course, this should not be used with infinite sequences.
 (defn interleave-all
   "Returns a lazy seq of the first item in each collection, then the second, etc.  If one collection ends,
 continues to interleave the others."
@@ -358,3 +358,14 @@ continues to interleave the others."
  if pred is satisfied by the arg.  Otherwise, the arg is returned."
  [pred f]
  (fn [arg] (if (pred arg) (f arg) arg)))
+
+
+(defn concatv
+  "Returns the concatenation of vectors."
+  ([] []) 
+  ([v] v) 
+  ;; stolen from clojure.core/into, but assumes all vectors
+  ([to from] (persistent! (reduce conj! (transient to) from)))
+  ([to from from2] (persistent! (reduce conj! (reduce conj! (transient to) from) from2)))
+  ;; maybe should use reducers instead of recursion
+  ([to from from2 & more] (apply concatv (concatv to from from2) more)))
