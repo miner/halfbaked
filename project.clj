@@ -5,6 +5,5 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.4.0"]]
   :repl-options {:init-ns miner.halfbaked}
-  :repositories [["clojars" {:url "https://clojars.org/repo" :creds :gpg}]]
   )
 
