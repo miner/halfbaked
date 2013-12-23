@@ -95,11 +95,15 @@
 ;; Lots of versions of this floating around the web
 ;; Some hack the keys as well.  Not mine.  cgrand suggested the
 ;; (transient map) as the initial value to speed things up a bit.
-(defn mapmap [f map]
+(defn mapmap [f mp]
   (persistent!
-   (reduce (fn [tm [k v]] (assoc! tm k (f v)))
-	   (transient map)
-	   map)))
+   (reduce-kv (fn [tm k v] (assoc! tm k (f v)))
+              (transient mp)
+              mp)))
+
+;; Returns map with keys replaced by calling (kf k) on each key.  Values are unchanged.
+(defn mapk [kf mp] 
+  (persistent! (reduce-kv (fn [m k v] (assoc! m (kf k) v)) (transient {}) mp)))
 
 (defn rotate
   "Returns a lazy seq of the elements of the finite sequence `coll` with
@@ -177,6 +181,9 @@ continues to interleave the others."
   "Returns true iff `num` is a multiple of `divisor`"
   (zero? (mod num divisor)))
 
+;; not the best thing to use on known vectors
+(defn first= [xs y]
+  (and (sequential? xs) (= (first xs) y)))
 
 ;; untested
 
@@ -211,23 +218,6 @@ continues to interleave the others."
 
 ;; Simple and works
 (defmacro basis [record-type-symbol] `(. ~record-type-symbol getBasis))
-
-(defn record-type? [record-type]
-  (isa? record-type clojure.lang.IRecord))
-
-(defn record? [obj]
-  (record-type? (type obj)))
-
-;; works SEM more general access give the record-type
-(defmacro record-fields [record-type]
-  `(when (isa? ~record-type clojure.lang.IRecord)
-    (. ~record-type (getBasis))))
-
-    
-(defn rec-fields [record-type]
-  (when (isa? record-type clojure.lang.IRecord)
-    (. (symbol (.getName record-type)) (getBasis))))
-
 
 ;; based on an idea by alan@malloys.com (he called it `?`, but I changed to `debug`)
 (defmacro debug [x]
@@ -280,7 +270,7 @@ continues to interleave the others."
 
 (defn flat-seq 
   "Like `clojure.core/flatten` but better, stronger, faster.  Takes an optional
-   predicate `pred` that returns true if an element could be flattened.  If unspecified,
+   predicate `pred` that returns true if an element should be flattened.  If unspecified,
    the default pred is sequential?.  Returns a single, flat, lazy sequence.  If
    `x` is nil, nil is returned.  If `(pred x)` is falsey, returns `(list x)` so it's
    always safe to treat the result as a seq."
@@ -303,19 +293,6 @@ continues to interleave the others."
 
 (defn realize [x]
   (if (lazy? x) (doall x) x))
-
-;; bench is a quick and dirty micro-benchmarking tool that realizes
-;; the result (at the top level) in order to avoid misleading timings
-;; due to laziness.  Use bench instead of clojure.core/time.
-(defmacro bench [expr]
-  `(let [result# (realize ~expr)]
-     ;; warm up
-     (dotimes [n# 5] (realize ~expr))
-     (dotimes [n# 5] (time (realize ~expr)))
-     (binding [clojure.core/*print-level* 10
-               clojure.core/*print-length* 10]
-       (println result#))
-     nil))
 
 (defn range-down
   "Returns a seq of integers from high (exclusive) down to low (inclusive).
@@ -369,3 +346,74 @@ continues to interleave the others."
   ([to from from2] (persistent! (reduce conj! (reduce conj! (transient to) from) from2)))
   ;; maybe should use reducers instead of recursion
   ([to from from2 & more] (apply concatv (concatv to from from2) more)))
+
+;; stolen from https://github.com/ptaoussanis/faraday
+(defmacro doto-cond "Diabolical cross between `doto`, `cond->` and `as->`."
+  [[name x] & clauses]
+  (assert (even? (count clauses)))
+  (let [g (gensym)
+        pstep (fn [[test-expr step]] `(when-let [~name ~test-expr]
+                                       (-> ~g ~step)))]
+    `(let [~g ~x]
+       ~@(map pstep (partition 2 clauses))
+       ~g)))
+
+(defn javaPrivateFieldValue 
+  "Dangerous hack, don't use it"
+  [obj-or-class fieldName]
+  (let [c (class obj-or-class)
+        obj (when-not (= c Class) obj-or-class)
+        clazz (if (= c Class) obj-or-class c)
+        ^java.lang.reflect.Field field  (try (.getDeclaredField ^Class clazz fieldName) (catch NoSuchFieldException e nil))]
+    (when field
+      (.setAccessible field true)
+      (.get field obj))))
+
+;; http://stackoverflow.com/questions/3407876/how-do-i-avoid-clojures-chunking-behavior-for-lazy-seqs-that-i-want-to-short-ci
+
+(defn unchunk
+  "Makes lazy seq from `s` that does not chunk values.  Might be useful for preventing
+  excess computation or side-effects."
+  [s]
+  (when (seq s)
+    (lazy-seq
+      (cons (first s)
+            (unchunk (next s))))))
+
+(defn keep-first
+  "Returns first truthy result of lazily applying `f` to each of the elements of `xs`.
+  Returns nil if no truthy result is found.  Unlike `keep`, will not return false."
+  [f xs]
+  (first (remove false? (keep f xs))))
+
+;; (case-of? expr foo bar) is better than (or (= expr 'foo) (= expr 'bar))
+(defmacro case-of? 
+  "Returns true if `expr` evaluates to any of the `constants`, otherwise false.
+As with `case`, constants must be compile-time literals, and need not be quoted."
+  [expr & constants]
+  `(case ~expr
+     ~constants true
+     false))
+
+;; source: http://stackoverflow.com/questions/1490869/how-to-get-vm-arguments-from-inside-of-java-application
+(defn jvmOpts []
+  "Returns seq of JVM options (strings)"
+  (seq (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean))))
+
+(defn warn-on-suspicious-jvmopts []
+  (when (some #(.startsWith ^String % "-XX:TieredStopAtLevel=") (jvmOpts))
+    (println "Warning: TieredStopAtLevel setting may give bad benchmark results.  Check your Leiningen settings.  https://github.com/technomancy/leiningen/blob/stable/doc/FAQ.md")))
+
+;; bench is a quick and dirty micro-benchmarking tool that realizes
+;; the result (at the top level) in order to avoid misleading timings
+;; due to laziness.  Use bench instead of clojure.core/time.
+(defmacro bench [expr]
+  `(let [result# (realize ~expr)]
+     (warn-on-suspicious-jvmopts)
+     ;; warm up
+     (dotimes [n# 5] (realize ~expr))
+     (dotimes [n# 5] (time (realize ~expr)))
+     (binding [clojure.core/*print-level* 10
+               clojure.core/*print-length* 10]
+       (println result#))
+     nil))

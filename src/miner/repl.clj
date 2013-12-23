@@ -8,11 +8,12 @@
 (defn scaffold
   "Print the ancestor method signatures of a given interface."
   [iface]
-  (doseq [[iface methods] (->> iface
+  (doseq [[iface methods] (->> ^Class iface
                                .getMethods
-                               (map #(vector (.getName (.getDeclaringClass %))
-                                             (symbol (.getName %))
-                                             (count (.getParameterTypes %))))
+                               (map (fn [^java.lang.reflect.Method meth] 
+                                      (vector (.getName (.getDeclaringClass meth))
+                                              (symbol (.getName meth))
+                                              (count (.getParameterTypes meth)))))
                                (group-by first))]
     (println (str "  " iface))
     (doseq [[_ name argcount] methods]
