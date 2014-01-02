@@ -1,36 +1,56 @@
 (ns miner.halfbaked
   (:require [clojure.string :as str]))
 
+;; See  clojure.lang.Compiler/CHAR_MAP for the official list of conversions
+;; Some don't happen in normal code so I elided them.
+(def demangle-replacements
+  (array-map "_QMARK_" "?"
+             "_BANG_" "!"
+             "_STAR_" "*"
+             "_GT_" ">"
+             "_EQ_" "="
+             "_PLUS_" "+"
+             "_LT_" "<"
+             "_SLASH_" "/"
+             "_AMPERSAND_" "&"
+             "_TILDE_" "~"
+             ;; keep underbar last
+             "_" "-"))
+
+;; a faster but ugly version is in demangle.clj
+(defn ^String demangle
+  "Demangle a clojure identifier name"
+  [^String s]
+  (reduce-kv str/replace s demangle-replacements))
+
 (defn compiled-fn-name
   "returns the simple name (a string) for the given function f as determined by the compiler"
   [f]
-  (when (fn? f)
-    (if-let [strname (str f)]
-      (clojure.string/replace ((re-find #"[$](.*)@" strname) 1) "_" "-"))))
+  (let [f (if (var? f) (var-get f) f)
+        strname (when (fn? f) (str f))]
+    (when strname
+      (demangle ((re-find #"[$](.*)@" strname) 1)))))
 
 
 ;; original:
 ;; http://groups.google.com/group/clojure/browse_thread/thread/234ac3ff0a4b6b80?pli=1
 ;; but slightly changed for Clojure updates since 1.0
 
-(defn unmangle
+(defn demangle-class-name
   "Given the name of a class that implements a Clojure function, returns the function's
    name in Clojure. Note: If the true Clojure function name
    contains any underscores (a rare occurrence), the unmangled name will
    contain hyphens at those locations instead."
   [class-name]
-  (.replace
-   (clojure.string/replace class-name #"^(.+)\$([^@]+)(|@.+)$" "$1/$2")
-   \_ \-))
+  (demangle (clojure.string/replace class-name #"^(.+)\$([^@]+)(|@.+)$" "$1/$2")))
 
 ;; only appropriate for debugging
 (defmacro current-fn-name []
   "Returns a string, the name of the current Clojure function"
-  `(-> (Throwable.) .getStackTrace first .getClassName unmangle))
+  `(-> (Throwable.) .getStackTrace first .getClassName demangle-class-name))
 
 (defmacro not-implemented []
   `(throw (Error. (str "fn " (current-fn-name) " not implemented"))))
-
 
 ;; Baishampayan Ghose  b.ghose@gmail.com
 (defmacro with-timeout [ms & body]
@@ -39,9 +59,10 @@
 
 
 ;; Defines a Dynamic var (Clojure 1.3+)
-;; Not the same as the old clojure.contrib.def version.
-(defmacro defvar
-  "Defines a dynamic var with an optional intializer and doc string"
+;; Not the same as the old clojure.contrib.def/defvar version.
+(defmacro defdynamic
+  "Defines a dynamic var with an optional intializer and doc string.  The naming convention
+is to use *earmuffs*, but that is not enforced."
   ([name]
      (list `def (with-meta name (assoc (meta name) :dynamic true))))
   ([name init]
@@ -407,6 +428,7 @@ As with `case`, constants must be compile-time literals, and need not be quoted.
 ;; bench is a quick and dirty micro-benchmarking tool that realizes
 ;; the result (at the top level) in order to avoid misleading timings
 ;; due to laziness.  Use bench instead of clojure.core/time.
+;; For serious work, use the criterium project, not this.
 (defmacro bench [expr]
   `(let [result# (realize ~expr)]
      (warn-on-suspicious-jvmopts)
@@ -417,3 +439,9 @@ As with `case`, constants must be compile-time literals, and need not be quoted.
                clojure.core/*print-length* 10]
        (println result#))
      nil))
+
+;; adapted from "guns" self@sungpae.com on the ML
+(defmacro dump-locals []
+ `(do (println  "; locals")
+      (clojure.pprint/pprint
+       ~(into {} (map (fn [x] [`'~x x]) (reverse (keys &env)))))))
