@@ -137,6 +137,10 @@ is to use *earmuffs*, but that is not enforced."
              n (if (<= cnt 1) 0 (mod n cnt))]
          (concat (drop n coll) (take n coll)))))
 
+;; ray@1729.org.uk on clojure mailing list
+(defn rotations [xs]
+  "Returns a seq of all possible rotations of the finite seq `xs`"
+  (take (count xs) (partition (count xs) 1 (cycle xs))))
 
 ;; probably not so efficient since it walks twice
 (defn kvs-map [fkey fval coll]
@@ -163,27 +167,26 @@ is to use *earmuffs*, but that is not enforced."
 
 
 ;; Like standard interleave but doesn't drop excess elements; also works with zero or one
-;; arg.  Of course, this should not be used with infinite sequences.
+;; arg.  It's prettier without the two-arg variant, but that's the common case and this way
+;; is faster than using just the variadic variant.
+
 (defn interleave-all
-  "Returns a lazy seq of the first item in each collection, then the second, etc.  If one collection ends,
-continues to interleave the others."
-  ([] nil)
+  "Returns a lazy seq of the first item in each collection, then the second, etc.  If one 
+collection ends, continues to interleave the others.  Naturally, you should take care with
+infinite sequences."
+  ([] (lazy-seq nil))
   ([c] (lazy-seq c))
 
   ([c1 c2]
      (lazy-seq
-      (let [s1 (seq c1) s2 (seq c2)]
-        (if (and s1 s2)
-          (cons (first s1) (cons (first s2) 
-                                 (interleave-all (rest s1) (rest s2))))
-	  (or s1 s2)))))
+      (cond (not (seq c1)) c2
+            (not (seq c2)) c1
+            :else (conj (interleave-all (rest c1) (rest c2)) (first c2) (first c1)))))
 
   ([c1 c2 & colls] 
      (lazy-seq 
-      (let [ss (map seq (conj colls c2 c1))]
-        (if (every? identity ss)
-          (concat (map first ss) (apply interleave-all (map rest ss)))
-	  (apply interleave-all (filter identity ss)))))))
+      (let [ss (keep seq (conj colls c2 c1))]
+        (concat (map first ss) (apply interleave-all (map rest ss)))))))
 
 
 ;; reference: http://www.rgagnon.com/javadetails/java-0456.html

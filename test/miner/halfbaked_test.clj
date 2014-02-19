@@ -18,9 +18,11 @@
        13 1 3))
 
 (deftest interleaving-all
-  (is (interleave-all '(1 3 5) [2 4 6 7]) (range 1 8))
-  (is (interleave-all (range 3)) (range 3))
+  (is (= (interleave-all '(1 3 5) [2 4 6 7]) (range 1 8)))
+  (is (= (interleave-all (range 3)) (range 3)))
   ;; regular interleave terminates on shortest collection
-  (is (interleave '(1 4 7) '(2 5) [3 6 8 9]) (range 1 6))
-  (is (interleave-all '(1 4 7) '(2 5) [3 6 8 9]) (range 1 9)))
+  (is (= (interleave '(1 4 7) '(2 5) [3 6 8 9]) (range 1 7)))
+  (is (= (interleave-all [0] '(1 4 7) '(2 5) [3 6 8 9 10] ()) (range 11)))
+  (is (= (interleave-all '(1 4 7) '(2 5) [3 6 8 9]) (range 1 10))))
+
 
