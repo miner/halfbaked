@@ -319,15 +319,16 @@ infinite sequences."
   (if (lazy? x) (doall x) x))
 
 (defn range-down
-  "Returns a seq of integers from high (exclusive) down to low (inclusive).
-   Low defaults to 0. Step is a positve decrement, defaults to 1.  Like
-   (reverse (range low high step)) but a bit faster."
+  "Returns a seq of integers from HIGH (exclusive) down to LOW (inclusive).
+   LOW defaults to 0. STEP is a positve decrement, defaults to 1.  Like
+   `(reverse (range low high step))' but a bit faster."
   ([high] (range (dec high) -1 -1))
   ([high low] (range (dec high) (dec low) -1))
   ([high low step]
      ;; calculate nearest multiple of step + offset using mod
-     (let [top (+ (- high (mod high step)) (mod low step))]
-       (range (if (>= top high) (- top step) top) (dec low) (- step)))))
+     (let [h (dec high)
+           hi (- h (mod (- h low) step))]
+       (range hi (dec low) (- step)))))
 
 ;; Something like this used to be in the fs lib, but it was dropped in v1.0.0.
 (defn fs-join [& path-elements]
@@ -448,3 +449,63 @@ As with `case`, constants must be compile-time literals, and need not be quoted.
  `(do (println  "; locals")
       (clojure.pprint/pprint
        ~(into {} (map (fn [x] [`'~x x]) (reverse (keys &env)))))))
+
+(defn reduce2
+  "Like `reduce` but takes two elements at a time from the collection.  The function `f`
+must take 3 args, the first being the accumulated result.  The initial value `init` is required."
+  [f init coll] 
+  (reduce (fn [r [a b]] (f r a b)) init (partition 2 coll)))
+
+(defn assoc-when 
+  "Like `assoc` but assocs into the map `m` only if `v` is truthy."
+  ([m k v] (if v (assoc m k v) m))
+  ([m k v & kvs] (reduce2 assoc-when
+                          (assoc-when m k v)
+                          kvs)))
+
+;; http://stackoverflow.com/questions/15629622/dissoc-with-pred
+(defn dissoc-by 
+  "Dissoc map entries in `m` for which `(f k v)` returns logically true, which k and v are
+  the key and value of the map entry."
+  [f m]
+  (reduce-kv (fn [m k v]
+               (if (f k v)
+                 m
+                 (dissoc m k)))
+             m m))
+
+;; For small maps, it's much faster to use (shrink-map (hash-map ...)) than to use assoc-when
+(defn shrink-map 
+  "Remove falsey values and associated keys from the map `m`"
+  [m]
+  (reduce-kv (fn [r k v] (if-not v (dissoc r k) r)) m m))
+
+
+;; http://stackoverflow.com/questions/11579804/clojure-reduce-with-three-parameters
+;;
+;; reduce-like with previous as part of state
+;; use clever partitioning to match up previous items
+;; (partition 2 1 coll)
+;; but you have to think about the start with no previous
+
+
+(defn compatible? 
+  "Returns true if two maps are 'compatible' in the sense that common keys have = values or
+are nil."
+  [m1 m2]
+  (boolean (reduce-kv (fn [m k v] (cond (nil? v) m
+                                        (nil? (get m k)) m
+                                        (= (get m k) v) m
+                                        :else (reduced false)))
+             (or m1 {})
+             m2)))
+
+;; from http://stackoverflow.com/questions/41107/how-to-generate-a-random-alpha-numeric-string
+(defn rand-hex
+  "Return a string of random hex digits of length `n' (default 16)"
+  ([] (Long/toHexString (Double/doubleToLongBits (rand))))
+  ([n] (str/join (conj (repeatedly (quot n 16) rand-hex)
+                       (subs (rand-hex) (- 16 (rem n 16)))))))
+
+
+                 
