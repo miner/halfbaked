@@ -292,24 +292,30 @@ infinite sequences."
 ;; If you're going to use reduce on the result, see the new clojure.core.reducers library
 ;; in Clojure 1.5 alpha1 for a much faster way to flatten.
 
-(defn flat-seq 
+;; guts of flat inspired by a post by Mark Engleberg  mark.engelberg@gmail.com
+(defn flat-seq
   "Like `clojure.core/flatten` but better, stronger, faster.  Takes an optional
    predicate `pred` that returns true if an element should be flattened.  If unspecified,
    the default pred is sequential?.  Returns a single, flat, lazy sequence.  If
    `x` is nil, nil is returned.  If `(pred x)` is falsey, returns `(list x)` so it's
    always safe to treat the result as a seq."
   {:static true}
-  ([x] (flat-seq sequential? x))
-  ([pred x] (letfn [(flat [coll] 
-                      (lazy-seq 
-                       (when-let [c (seq coll)] 
-                         (let [x (first c)]
-                           (if (pred x) 
-                             (concat (flat x) (flat (rest c))) 
-                             (conj (flat (rest c)) x))))))]
-        (cond (nil? x) nil
-              (pred x) (flat x)
-              :else (list x)))))
+  ([xs] (flat-seq sequential? xs))
+  ([pred xs]
+     (let [flat1 (fn flat [pred xs]
+                   (if-let [xs (seq xs)]
+                     (let [y (first xs)
+                           ys (rest xs)]
+                       (if (pred y)
+                         (if-let [y (seq y)]
+                           (recur pred (cons (first y) (cons (rest y) ys)))
+                           ;; empty list case
+                           (recur pred ys))
+                         (lazy-seq (cons y (flat pred ys)))))
+                     ()))]
+       (cond (nil? xs) nil
+             (pred xs) (flat1 pred xs)
+             :else (list xs)))))
 
 
 (defn lazy? [x]
@@ -326,9 +332,7 @@ infinite sequences."
   ([high low] (range (dec high) (dec low) -1))
   ([high low step]
      ;; calculate nearest multiple of step + offset using mod
-     (let [h (dec high)
-           hi (- h (mod (- h low) step))]
-       (range hi (dec low) (- step)))))
+     (range (- (dec high) (mod (- (dec high) low) step)) (dec low) (- step))))
 
 ;; Something like this used to be in the fs lib, but it was dropped in v1.0.0.
 (defn fs-join [& path-elements]
