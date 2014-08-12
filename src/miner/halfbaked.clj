@@ -290,7 +290,7 @@ infinite sequences."
 
 ;; flat-seq is about twice as fast as clojure.core/flatten.
 ;; If you're going to use reduce on the result, see the new clojure.core.reducers library
-;; in Clojure 1.5 alpha1 for a much faster way to flatten.
+;; for a much faster way to flatten.
 
 ;; guts of flat inspired by a post by Mark Engleberg  mark.engelberg@gmail.com
 (defn flat-seq
@@ -449,10 +449,18 @@ As with `case`, constants must be compile-time literals, and need not be quoted.
      nil))
 
 ;; adapted from "guns" self@sungpae.com on the ML
-(defmacro dump-locals []
- `(do (println  "; locals")
+;; not sure about needing the reverse
+(defmacro dump-locals [label]
+ `(do (println  "; locals" ~label)
       (clojure.pprint/pprint
        ~(into {} (map (fn [x] [`'~x x]) (reverse (keys &env)))))))
+
+;; http://stackoverflow.com/questions/11579804/clojure-reduce-with-three-parameters
+;;
+;; reduce-like with previous as part of state
+;; use clever partitioning to match up previous items
+;; (partition 2 1 coll)
+;; but you have to think about the start with no previous
 
 (defn reduce2
   "Like `reduce` but takes two elements at a time from the collection.  The function `f`
@@ -484,25 +492,18 @@ must take 3 args, the first being the accumulated result.  The initial value `in
   [m]
   (reduce-kv (fn [r k v] (if-not v (dissoc r k) r)) m m))
 
-
-;; http://stackoverflow.com/questions/11579804/clojure-reduce-with-three-parameters
-;;
-;; reduce-like with previous as part of state
-;; use clever partitioning to match up previous items
-;; (partition 2 1 coll)
-;; but you have to think about the start with no previous
-
-
 (defn compatible? 
   "Returns true if two maps are 'compatible' in the sense that common keys have = values or
-are nil."
+are nil.  That is, there are no conflicting values, ignoring nil."
   [m1 m2]
-  (boolean (reduce-kv (fn [m k v] (cond (nil? v) m
-                                        (nil? (get m k)) m
-                                        (= (get m k) v) m
-                                        :else (reduced false)))
-             (or m1 {})
-             m2)))
+  (or (empty? m1)
+      (empty? m2)
+      (boolean (reduce-kv (fn [m k v] (cond (nil? v) m
+                                            (nil? (get m k)) m
+                                            (= (get m k) v) m
+                                            :else (reduced false)))
+                          m1
+                          m2))))
 
 ;; from http://stackoverflow.com/questions/41107/how-to-generate-a-random-alpha-numeric-string
 (defn rand-hex
@@ -512,4 +513,70 @@ are nil."
                        (subs (rand-hex) (- 16 (rem n 16)))))))
 
 
-                 
+;; The pr-str treatment works around problems with Clojure data that does not implement the
+;; java.util.Formattable interface.  For example, a LazySeq doesn't look good in format %s.
+
+(defn exception-format [fmt & args]
+  "Like `format` but non-numeric args will be pre-converted with `pr-str` and thus present
+  as strings.  That means only the numeric and string format codes are useful.  When in
+  doubt, use %s.  `*print-level*` and `*print-length*` are constrained to avoid lengthy
+  messages."
+  (binding [*print-level* 2
+            *print-length* 10]
+    (apply format fmt (map (fn [x] (if (number? x) x (pr-str x))) args))))
+
+(defn exception [info-map fmt & args]
+  ;; ex-info reimagined
+  ;; :cause value inside info-map is treated specially. As with ex-info, it must be Throwable.
+  (if-let [cause (:cause info-map)]
+    (ex-info (apply exception-format fmt args) (dissoc :cause info-map) cause)
+    (ex-info (apply exception-format fmt args) info-map)))
+
+;; hack to allow keywords as "guides" for arguments
+;; (foo :a 1 :b 2)
+;; (foo :a 1 2)
+;; (foo 1 :b 2)
+;;  all same as:
+;; (foo 1 2)
+
+;;; Really needs macro for def or call site to precompile into normal positional arg form
+;;; Be aware of multi-arity calling.  Could also target single map arg.  (Just add the keys
+;;; back in with zipmap.)
+
+(defn dekey-args
+  "Return a vector of args after removing optional 'guide' keywords.  The guide keywords, if
+  present, must match order given by `keys`."  
+  [keys all-args]
+  (let [guides (set keys)]
+    (loop [ks (seq keys) args (seq all-args) res []]
+      (if (and ks args)
+        (cond (= (first args) (first ks)) (recur ks (next args) res)
+              (get guides (first args))
+                (throw (exception {:keys keys :args all-args :unexpected (first args)}
+                                  "Out of order guide keyword " (first args)))
+              :else (recur (next ks) (next args) (conj res (first args))))
+        (if args
+          (throw (exception {:keys keys :args all-args :unmatched args}
+                            "Unmatched args " args))
+          res)))))
+
+
+;; from declined CLJ-1468
+(defn deep-merge
+  "Like merge, but merges maps recursively."
+  [& maps]
+  (if (every? map? maps)
+    (apply merge-with deep-merge maps)
+    (last maps)))
+
+(defn deep-merge-with
+  "Like merge-with, but merges maps recursively, applying the given fn
+  only when there's a non-map at a particular level."
+  [f & maps]
+  (apply
+    (fn m [& maps]
+      (if (every? map? maps)
+        (apply merge-with m maps)
+        (apply f maps)))
+    maps))
+ 
