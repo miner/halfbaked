@@ -1,6 +1,21 @@
 (ns miner.halfbaked
   (:require [clojure.string :as str]))
 
+
+(defn sym
+  "Like `symbol` but allows more flexibility in the types of arguments, which can be a Namespace,
+  String, Keyword or Symbol."
+  ([x] (cond (symbol? x) x
+             (string? x) (symbol x)
+             (keyword? x) (symbol (namespace x) (name x))
+             :else (symbol (str x))))
+  ([ns x] (cond (nil? ns) (sym x)
+                (string? ns) (symbol ns (name x))
+                (or (keyword? ns) (symbol? ns)) (symbol (name ns) (name x))
+                ;; (instance? clojure.lang.Namespace ns)
+                :else (symbol (str ns) (name x)))))
+
+
 ;; See  clojure.lang.Compiler/CHAR_MAP for the official list of conversions
 ;; Some don't happen in normal code so I elided them.
 (def demangle-replacements
@@ -27,14 +42,18 @@
   "returns the simple name (a string) for the given function f as determined by the compiler"
   [f]
   (let [f (if (var? f) (var-get f) f)
-        strname (when (fn? f) (str f))]
-    (when strname
-      (demangle ((re-find #"[$](.*)@" strname) 1)))))
+        compiled-name (when (fn? f) (str f))
+        fname (second (first (re-seq #"[$](.*)@" compiled-name)))]
+    (if fname
+      (demangle fname)
+      compiled-name)))
 
 
 ;; original:
 ;; http://groups.google.com/group/clojure/browse_thread/thread/234ac3ff0a4b6b80?pli=1
 ;; but slightly changed for Clojure updates since 1.0
+
+;; See also clojure.repl/demunge for the official way to do this now.
 
 (defn demangle-class-name
   "Given the name of a class that implements a Clojure function, returns the function's
@@ -140,7 +159,8 @@ is to use *earmuffs*, but that is not enforced."
 ;; ray@1729.org.uk on clojure mailing list
 (defn rotations [xs]
   "Returns a seq of all possible rotations of the finite seq `xs`"
-  (take (count xs) (partition (count xs) 1 (cycle xs))))
+  (let [n (count xs)]
+    (take n (partition n 1 (cycle xs)))))
 
 ;; probably not so efficient since it walks twice
 (defn kvs-map [fkey fval coll]
@@ -152,18 +172,9 @@ is to use *earmuffs*, but that is not enforced."
 
 ;; consider reduce-kv as an alternative if you're going to reduce the result
 
-
-;; inspired by ninjudd/clojure-useful (which has moved to flatland/useful I think)
-(defn update
-  "Update value in map where f is a function that takes the old value and the supplied args and
-   returns the new value. For efficiency, does not change map if the old value is the same as the
-   new value. If key is sequential, update all keys in the sequence with the same function."  
-  [map key f & args]
-  (if (sequential? key)
-    (reduce #(apply update %1 %2 f args) map key)
-    (let [old (get map key)
-          new (apply f old args)]
-      (if (identical? old new) map (assoc map key new)))))
+;; maps f against success tails of the coll
+(defn map-rest [f coll]
+  (map f (take-while seq (iterate rest coll))))
 
 
 ;; Like standard interleave but doesn't drop excess elements; also works with zero or one
@@ -200,10 +211,10 @@ infinite sequences."
 (defn str-clean [st]
   (str/escape (str/trim st) {\u2019 \' \u2018 \' \u201c \" \u201d \" \u2013 \- \u2014 \-}))
 
-
+;; rem is slightly faster than mod, their zeroes are equivalent
 (defn zmod? [num divisor]
   "Returns true iff `num` is a multiple of `divisor`"
-  (zero? (mod num divisor)))
+  (zero? (rem num divisor)))
 
 ;; not the best thing to use on known vectors
 (defn first= [xs y]
@@ -222,9 +233,9 @@ infinite sequences."
 
 ;; %0 is bound to the function's name within the function.  Useful for pre-conditions,
 ;; logging and error reporting.
-(defmacro defn0 [name & fdcls]
-  `(let [~'%0 (symbol (name (ns-name *ns*)) (name '~name))]
-     (defn ~name ~@fdcls)))
+(defmacro defn0 [fname & fdcls]
+  `(let [~'%0 (symbol (name (ns-name *ns*)) (name '~fname))]
+     (defn ~fname ~@fdcls)))
 
 
 ;;; From Meikel Brandmeyer (kotarak) <mb@kotka.de> on the clojure mailing list:
@@ -316,6 +327,16 @@ infinite sequences."
        (cond (nil? xs) nil
              (pred xs) (flat1 pred xs)
              :else (list xs)))))
+
+
+;; Consider using reducers instead of this
+(defn eager-flatten
+  "not lazy, but much faster than clojure.core/flatten."
+  [coll] 
+  (loop [cs coll, result []]
+    (cond (sequential? (first cs)) (recur (concat (first cs) (rest cs)) result)
+          (empty? cs) (seq result)
+          :else (recur (rest cs) (conj result (first cs))))))
 
 
 (defn lazy? [x]
@@ -579,4 +600,76 @@ are nil.  That is, there are no conflicting values, ignoring nil."
         (apply merge-with m maps)
         (apply f maps)))
     maps))
- 
+
+
+(defn split= [marker coll]
+  "Partitions items within coll as separated by marker value.  Marker never appears in results,
+  and is ignored at the front or end of coll"
+  (let [mark? (fn [x] (= x marker))]
+    (take-nth 2 (partition-by mark? (drop-while mark? coll)))))
+
+
+;; from Frank on mailing list
+(defn partition-when
+  [f coll]
+  (lazy-seq
+   (when-let [s (seq coll)]
+     (let [fst (first s)
+           run (cons fst (take-while #(not (f %)) (next s)))]
+       (cons run (partition-when f (seq (drop (count run) s))))))))
+
+
+
+;; Note: for small vectors, linear search is probably just as good (using Java .indexOf)
+
+;; Best official way would be to use a record like (defrecord Node [val prev next]) but there's
+;; some syntax overhead and boilerplate code associate with that.  Finger-trees are another
+;; possiblity.
+
+;; When you want the equivalent of a doubly-linked list, use two maps
+;; Variants return nil on boundaries, wrap or bound (overflow stays the same)
+(defn prev-map [coll]
+  (zipmap (rest coll) coll))
+
+(defn next-map [coll]
+  (zipmap coll (rest coll)))
+
+(defn vlast [coll]
+  ;; somewhat better than last for vector case
+  (if (vector? coll) (peek coll) (last coll)))
+
+;; If you want the next/prev to wrap around
+(defn wrap-prev-map [coll]
+  (zipmap coll (cons (vlast coll) coll)))
+
+(defn wrap-next-map [coll]
+  (zipmap (cons (vlast coll) coll) coll))
+
+(defn bounded-prev-map [coll]
+  (zipmap coll (cons (first coll) coll)))
+
+(defn bounded-next-map [coll]
+  (let [lst (vlast coll)]
+    (zipmap (cons lst coll) (cons lst (rest coll)))))
+
+
+;; app - helper for handling variadic functions in transducers...
+;;   (map (app max))
+;;
+;; looks a bit nicer than any of these:
+;;   (map #(apply max %))
+;;   (map (partial apply max))
+;;   (map (fn [args] (apply max args)))
+
+;; "app" is shortened "apply", somewhat mnemonic.  Looks good in a transducer sequence.
+
+(defn app
+  "Similar to `partial`, but for use a variadic function.  Takes variadic `f` and any number
+  of fixed arguments.  Returns a function that takes a collection as its single argument and
+  applies `f` to the concatenation of the fixed arguments and the collection argument."
+  ([f] (fn [args] (apply f args)))
+  ([f a] (fn [args] (apply f a args)))
+  ([f a b] (fn [args] (apply f a b args)))
+  ([f a b c] (fn [args] (apply f a b c args)))
+  ([f a b c & more] (fn [args] (apply f a b c (concat more args)))))
+
