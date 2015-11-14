@@ -340,7 +340,7 @@ infinite sequences."
 
 
 (defn lazy? [x]
-  (and (instance? clojure.lang.IPending x) (seq? x)))
+  (and (instance? clojure.lang.IPending x) (seq? x) (not (realized? x))))
 
 (defn realize [x]
   (if (lazy? x) (doall x) x))
@@ -396,6 +396,25 @@ infinite sequences."
   ([to from from2] (persistent! (reduce conj! (reduce conj! (transient to) from) from2)))
   ;; maybe should use reducers instead of recursion
   ([to from from2 & more] (apply concatv (concatv to from from2) more)))
+
+
+(defn catv
+  "Returns the concatenation of the given collections as a vector."
+  ([] []) 
+  ([coll] (vec coll))
+  ;; stolen from clojure.core/into, but assumes all vectors
+  ([to from]
+   (into (if (vector? to) to (vec to)) from))
+  ([to from from2]
+   (if (vector? to)
+     (persistent! (reduce conj! (reduce conj! (transient to) from) from2))
+     (persistent! (reduce conj! (reduce conj! (transient (vec to)) from) from2))))
+  ;; maybe should use reducers instead of recursion
+  ([to from from2 & more]
+   (if (vector? to)
+     (reduce into to (list* from from2 more))
+     (reduce into [] (list* to from from2 more)))))
+
 
 ;; stolen from https://github.com/ptaoussanis/faraday
 (defmacro doto-cond "Diabolical cross between `doto`, `cond->` and `as->`."
@@ -458,16 +477,24 @@ As with `case`, constants must be compile-time literals, and need not be quoted.
 ;; the result (at the top level) in order to avoid misleading timings
 ;; due to laziness.  Use bench instead of clojure.core/time.
 ;; For serious work, use the criterium project, not this.
-(defmacro bench [expr]
-  `(let [result# (realize ~expr)]
-     (warn-on-suspicious-jvmopts)
-     ;; warm up
-     (dotimes [n# 5] (realize ~expr))
-     (dotimes [n# 5] (time (realize ~expr)))
-     (binding [clojure.core/*print-level* 10
-               clojure.core/*print-length* 10]
-       (println result#))
-     nil))
+(defmacro bench
+  ([expr]
+   `(let [result# (realize ~expr)]
+      (println '~expr) (flush)
+      (warn-on-suspicious-jvmopts)
+      ;; warm up
+      (dotimes [n# 5] (realize ~expr))
+      (dotimes [n# 10] (time (realize ~expr)) (flush))
+      (flush)
+      (binding [clojure.core/*print-level* 10
+                clojure.core/*print-length* 10]
+        (println result#)
+        (flush))
+      nil))
+  ([expr & exprs]
+   `(do
+      (bench ~expr)
+      (bench ~@exprs))))
 
 ;; adapted from "guns" self@sungpae.com on the ML
 ;; not sure about needing the reverse
@@ -672,4 +699,109 @@ are nil.  That is, there are no conflicting values, ignoring nil."
   ([f a b] (fn [args] (apply f a b args)))
   ([f a b c] (fn [args] (apply f a b c args)))
   ([f a b c & more] (fn [args] (apply f a b c (concat more args)))))
+
+
+;; CLJ-1771 for multi-arity assoc-in
+(defn assoc-in+
+  ([m [k & ks] v]
+   (if ks
+     (assoc m k (assoc-in (get m k) ks v))
+     (assoc m k v))) 
+  ([m ks v & kvs]
+   (let [ret (assoc-in m ks v)]
+     (if kvs
+       (if (next kvs)
+         (recur ret (first kvs) (second kvs) (nnext kvs))
+         (throw (ex-info "missing value" {:key (first kvs)})))
+       ret))))
+
+
+;; invented lastv at one point, but realized it was just peek
+
+;; Related to power-limit
+;; http://gearon.blogspot.com/2015/02/tweaking-power-limit.html
+
+(defn fixed-point
+  ([f] (fixed-point f 0))
+  ([f guess] (fixed-point f guess 1000))
+  ([f guess limit] (fixed-point f guess limit =))
+  ([f guess limit eq?]
+   (when (pos? limit)
+     (let [guess' (f guess)]
+       (if (eq? guess' guess)
+         guess
+         (recur f guess' (dec limit) eq?))))))
+
+;; SEM rewrite with converge-seq (below)
+(defn converge-seq-or-throw
+  "Eager iteration of f, starting with n.  Terminates when result is repeated
+  consecutively (reaches a fixed point).  Equality check calls eq? (default =).  Aborts if
+  limit on count is reached (default 1000)."
+  ([f n] (converge-seq-or-throw f n 1000 = []))
+  ([f n limit] (converge-seq-or-throw f n limit = []))
+  ([f n eq? limit] (converge-seq-or-throw f n limit eq? []))
+  ([f n limit eq? res]
+   (if (eq? (peek res) n)
+     res
+     (if (>= (count res) limit)
+       ;; abort
+       (throw (ex-info (str "Aborted converge-seq-or-throw due to result exceeding count limit " limit)
+                       {:limit limit
+                        :n n
+                        :f (str f)
+                        :partial-result res
+                        :eq? (str eq?)}))
+       (recur f (f n) limit eq? (conj res n))))))
+
+;; lazy, but slow
+(defn conv-seq
+  ([f x] (conv-seq f x 1000))
+  ([f x limit]
+   (dedupe (take limit (iterate f x)))))
+
+;; Does not expect nil as a starting X -- should be fixed now???
+(defn converge-seq
+  "Eager iteration of f, starting with x.  Terminates when result is repeated
+  consecutively (reaches a fixed point).  Equality check calls eq? (default =).  Returns nil
+  if limit count is exceeded (default 1000)."
+  ([f x] (converge-seq f x 1000 =))
+  ([f x limit] (converge-seq f x limit =))
+  ([f x limit eq?]
+   (let [conv (fn conv [^long limit res x]
+                (if (eq? (peek res) x)
+                  res
+                  (when (pos? limit)
+                    (recur (dec limit) (conj res x) (f x)))))]
+     (conv x limit []))))
+
+;; short for "keep if..."
+(defn kif
+  "Returns a new function that calls `testfn` on single argument and returns that argument
+  if the test succeeds, otherwise returns result of optional `elsefn` on argument.  If `elsefn` is
+  omitted, failure on `testfn` returns nil."
+  ([testfn] (fn [x] (when (testfn x) x)))
+  ([testfn elsefn] (fn [x] (if (testfn x) x (elsefn x)))))
+
+;; potential issue with multiple evaluaton of ~f, but that is expected to be a symbol
+(defmacro unroll1 [f base & args]
+  (if args
+    `(unroll1 ~f (~f ~base ~(first args)) ~@(next args))
+    base))
+
+(defmacro unroll2 [f base & args]
+  (if args
+    (if (next args)
+      `(unroll2 ~f (~f ~base ~(first args) ~(second args)) ~@(nnext args))
+      (throw (ex-info "Missing value" {:last-seen (first args)})))
+    base))
+
+
+
+(defn peek-sorted [sorted]
+  (first sorted))
+
+;; should we throw on empty?
+(defn pop-sorted [sorted]
+  {:pre [(seq sorted)]}
+  (disj sorted (peek-sorted sorted)))
 
