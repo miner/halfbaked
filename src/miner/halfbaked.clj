@@ -135,6 +135,7 @@ is to use *earmuffs*, but that is not enforced."
 ;; Lots of versions of this floating around the web
 ;; Some hack the keys as well.  Not mine.  cgrand suggested the
 ;; (transient map) as the initial value to speed things up a bit.
+;; aka map-vals
 (defn mapmap [f mp]
   (persistent!
    (reduce-kv (fn [tm k v] (assoc! tm k (f v)))
@@ -142,6 +143,7 @@ is to use *earmuffs*, but that is not enforced."
               mp)))
 
 ;; Returns map with keys replaced by calling (kf k) on each key.  Values are unchanged.
+;; aka map-keys
 (defn mapk [kf mp] 
   (persistent! (reduce-kv (fn [m k v] (assoc! m (kf k) v)) (transient {}) mp)))
 
@@ -767,12 +769,12 @@ are nil.  That is, there are no conflicting values, ignoring nil."
   ([f x] (converge-seq f x 1000 =))
   ([f x limit] (converge-seq f x limit =))
   ([f x limit eq?]
-   (let [conv (fn conv [^long limit res x]
+   (let [conv (fn [^long limit res x]
                 (if (eq? (peek res) x)
                   res
                   (when (pos? limit)
                     (recur (dec limit) (conj res x) (f x)))))]
-     (conv x limit []))))
+     (conv limit [] x))))
 
 ;; short for "keep if..."
 (defn kif
