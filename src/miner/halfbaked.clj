@@ -2,6 +2,8 @@
   (:require [clojure.string :as str]))
 
 
+
+
 (defn sym
   "Like `symbol` but allows more flexibility in the types of arguments, which can be a Namespace,
   String, Keyword or Symbol."
@@ -31,6 +33,8 @@
              "_TILDE_" "~"
              ;; keep underbar last
              "_" "-"))
+
+;; see also clojure.main/demunge
 
 ;; a faster but ugly version is in demangle.clj
 (defn ^String demangle
@@ -135,11 +139,21 @@ is to use *earmuffs*, but that is not enforced."
 ;; Lots of versions of this floating around the web
 ;; Some hack the keys as well.  Not mine.  cgrand suggested the
 ;; (transient map) as the initial value to speed things up a bit.
+;; SEM I thought about starting from  (emtpy mp) but didn't performance test.
 ;; aka map-vals
-(defn mapmap [f mp]
+(defn map-vals [f mp]
   (persistent!
    (reduce-kv (fn [tm k v] (assoc! tm k (f v)))
               (transient mp)
+              mp)))
+
+;; since we're changing the keys, we have to start with an (empty mp) -- preserves type,
+;; could be sorted, etc.  Not Tested.  Need to try with sorted-map, etc.
+(defn mapmap
+  [fk fv mp]
+  (persistent!
+   (reduce-kv (fn [tm k v] (assoc! tm (fk k) (fv v)))
+              (transient {})
               mp)))
 
 ;; Returns map with keys replaced by calling (kf k) on each key.  Values are unchanged.
@@ -354,8 +368,14 @@ infinite sequences."
   ([high] (range (dec high) -1 -1))
   ([high low] (range (dec high) (dec low) -1))
   ([high low step]
-     ;; calculate nearest multiple of step + offset using mod
-     (range (- (dec high) (mod (- (dec high) low) step)) (dec low) (- step))))
+   ;; calculate nearest multiple of step + offset using mod
+   (cond (pos? step) (range (- (dec high) (mod (- (dec high) low) step)) (dec low) (- step))
+         (neg? step) (range (+ (inc high) (mod (- low (inc high)) (- step)))
+                            (inc low) (- step))
+         ;; GIGO for zero step -- but safer than infinite seq like range does
+         :else nil)))
+
+
 
 ;; Something like this used to be in the fs lib, but it was dropped in v1.0.0.
 (defn fs-join [& path-elements]
@@ -517,6 +537,11 @@ As with `case`, constants must be compile-time literals, and need not be quoted.
 must take 3 args, the first being the accumulated result.  The initial value `init` is required."
   [f init coll] 
   (reduce (fn [r [a b]] (f r a b)) init (partition 2 coll)))
+
+(defn tduce2
+  [f init coll]
+  (transduce (partition 2) (fn ([r] r) ([r [a b]] (f r a b))) init coll))
+
 
 (defn assoc-when 
   "Like `assoc` but assocs into the map `m` only if `v` is truthy."
