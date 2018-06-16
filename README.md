@@ -2,6 +2,9 @@
 
 My collection of half-baked, semi-useful Clojure code.  
 
+Mostly retired.  I'm not making this a library anymore.  My personal experiments are now in
+my hack project.
+
 ## Usage
 
 Take what you like.

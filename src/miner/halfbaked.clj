@@ -377,6 +377,57 @@ infinite sequences."
 
 
 
+(defn rem-down
+  "Returns a seq of integers from HIGH (exclusive) down to LOW (inclusive).
+   LOW defaults to 0. STEP is a positve decrement, defaults to 1.  Like
+   `(reverse (range low high step))' but a bit faster."
+  ([high] (range (dec high) -1 -1))
+  ([high low] (range (dec high) (dec low) -1))
+  ([high low step]
+   ;; calculate nearest multiple of step + offset using mod
+   (cond (pos? step) (range (- (dec high) (rem (- (dec high) low) step)) (dec low) (- step))
+         (neg? step) (range (+ (inc high) (rem (- low (inc high)) (- step)))
+                            (inc low) (- step))
+         ;; GIGO for zero step -- but safer than infinite seq like range does
+         :else nil)))
+
+
+
+(defn rdown
+  "Returns a seq of integers from HIGH (exclusive) down to LOW (inclusive).
+   LOW defaults to 0. STEP is a positve decrement, defaults to 1.  Like
+   `(reverse (range low high step))' but a bit faster."
+  ([high] (range (dec high) -1 -1))
+  ([high low] (range (dec high) (dec low) -1))
+  ([high low step]
+   ;; calculate nearest multiple of step + offset using mod
+   (cond (pos? step) (range (- (dec high) (rem (- (dec high) low) step)) (dec low) (- step))
+         (neg? step) (range (+ (inc high) (rem (- low (inc high)) (- step)))
+                            (inc low) (- step))
+         ;; GIGO for zero step -- but safer than infinite seq like range does
+         :else nil)))
+
+
+(defn smoke-down
+  ([] (smoke-down range-down))
+  ([range-down]
+   (assert (= (reverse (range 10)) (range-down 10)))
+   (assert (= (reverse (range 3 100 7)) (range-down 100 3 7)))
+   (assert (= (reverse (range -3 -100 -7)) (range-down -100 -3 -7)))
+   (assert (= (reverse (range 30 -10 -7)) (range-down -10 30 -7)))
+   (assert (= (reverse (range -30 -10 7)) (range-down -10 -30 7)))
+   (doseq [n (range 1 10)]
+     (assert (= (reverse (range 3 100 n)) (range-down 100 3 n))))
+   (doseq [n (range -1 -10 -1)]
+     (assert (= (reverse (range 100 3 n)) (range-down 3 100 n))))
+   true))
+
+(defn smoker []
+  (and (smoke-down range-down)
+       (smoke-down rdown)
+       (smoke-down rem-down)))
+
+
 ;; Something like this used to be in the fs lib, but it was dropped in v1.0.0.
 (defn fs-join [& path-elements]
   "Joins path-elements into a string using the File/separator between elemements."
